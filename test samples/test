@@ -1,0 +1,14 @@
+import kagglehub, glob, shutil, os
+
+brain_path = kagglehub.dataset_download("masoudnickparvar/brain-tumor-mri-dataset")
+pneumonia_path = kagglehub.dataset_download("paultimothymooney/chest-xray-pneumonia")
+
+os.makedirs("test_samples", exist_ok=True)
+
+brain_img = glob.glob(f"{brain_path}/**/*.jpg", recursive=True)[0]
+pneumonia_img = glob.glob(f"{pneumonia_path}/**/*.jpeg", recursive=True)[0]
+
+shutil.copy(brain_img, "test_samples/sample_brain_mri.jpg")
+shutil.copy(pneumonia_img, "test_samples/sample_chest_xray.jpeg")
+
+print("Saved to test_samples/ folder — ready to upload in Streamlit")
