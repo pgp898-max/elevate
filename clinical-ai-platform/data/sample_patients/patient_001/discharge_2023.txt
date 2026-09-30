@@ -1,0 +1,8 @@
+CLINICAL DISCHARGE SUMMARY
+Patient ID: patient_001
+Admit Date: 2023-04-12 | Discharge Date: 2023-04-18
+History of Present Illness: Patient has a 5-year documented history of essential hypertension managed with Lisinopril 10mg daily. Reported persistent headaches and mild visual disturbances.
+Hospital Course: Neurological evaluation noted no acute focal deficits. Brain MRI ordered for further screening.
+Discharge Diagnoses: 1. Controlled Hypertension. 2. Chronic Tension Headaches. 3. Rule out intracranial space-occupying lesion.
+Medications on Discharge: Lisinopril 10mg daily, Aspirin 81mg daily.
+Follow-up: Outpatient neurology clinic in 4 weeks.
