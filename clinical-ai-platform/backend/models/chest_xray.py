@@ -4,37 +4,31 @@ Model: NeuronZero/CXR-Classifier (Hugging Face)
 Task: Classifies chest X-ray images (e.g., NORMAL vs PNEUMONIA)
 
 This module provides a standalone `predict(image_path)` function.
-It uses Hugging Face transformers with lazy loading so the model is
-only loaded into RAM when actually invoked.
+It uses lazy loading so heavy ML frameworks are only loaded into RAM inside predict().
 """
 
 import os
 from typing import Dict, Any, Optional
 from PIL import Image
-import torch
-from transformers import AutoImageProcessor, AutoModelForImageClassification
 
 # Hugging Face model identifier
 MODEL_ID = "NeuronZero/CXR-Classifier"
 
-# Module-level variables to hold the loaded processor and model in memory (singleton pattern)
-_processor: Optional[AutoImageProcessor] = None
-_model: Optional[AutoModelForImageClassification] = None
+# Module-level variables for temporary model references
+_processor: Optional[Any] = None
+_model: Optional[Any] = None
 
 
 def load_model():
     """
-    Loads the processor and model into memory if not already loaded.
-    This 'lazy loading' pattern keeps RAM usage low until inference is needed.
+    Loads the processor and model into memory lazily.
     """
     global _processor, _model
+    from transformers import AutoImageProcessor, AutoModelForImageClassification
     if _processor is None:
-        # Load the feature extractor / image preprocessor suited for this ViT model
         _processor = AutoImageProcessor.from_pretrained(MODEL_ID)
     if _model is None:
-        # Load the pre-trained weights for image classification
         _model = AutoModelForImageClassification.from_pretrained(MODEL_ID)
-        # Set to evaluation mode (turns off dropout, batchnorm training updates)
         _model.eval()
     return _processor, _model
 
@@ -52,6 +46,11 @@ def predict(image_path: str) -> Dict[str, Any]:
     """
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found at path: {image_path}")
+
+    # Lazy import PyTorch and transformers inside predict()
+    import gc
+    import torch
+    from transformers import AutoImageProcessor, AutoModelForImageClassification
 
     # Step 1: Ensure processor and model are loaded
     processor, model = load_model()
@@ -79,11 +78,23 @@ def predict(image_path: str) -> Dict[str, Any]:
         label = model.config.id2label.get(idx_val, model.config.id2label.get(str(idx_val), f"CLASS_{idx_val}"))
         confidence = float(top_prob.item())
 
-    # Return result conforming to platform requirements
-    return {
+    # Build return payload
+    result = {
         "label": label,
         "confidence": round(confidence, 4)
     }
+
+    # Step 8: Explicitly delete loaded model object and free memory
+    global _model, _processor
+    del model
+    del processor
+    _model = None
+    _processor = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return result
 
 
 if __name__ == "__main__":

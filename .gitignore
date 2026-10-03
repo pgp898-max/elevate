@@ -7,13 +7,13 @@ venv/
 .venv/
 
 # Model weights
-data/weights/*.keras
-data/weights/*.pt
-data/weights/*.onnx
+**/data/weights/*.keras
+**/data/weights/*.pt
+**/data/weights/*.onnx
 weights/
 
 # Vector database storage
-data/chroma_db/
+**/chroma_db/
 
 # Secrets and local environment files
 .env

@@ -13,6 +13,7 @@ import shutil
 import tempfile
 from typing import List, Optional
 from fastapi import FastAPI, File, Form, UploadFile, status
+from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import validation schemas
@@ -34,6 +35,32 @@ app = FastAPI(
     description="Unified API for routing patient imaging and clinical records to specialist AI models.",
     version="1.0.0"
 )
+
+
+def custom_openapi():
+    """
+    Ensures file upload parameters in OpenAPI 3.1 contain format: binary,
+    allowing Swagger UI to render native file selection inputs instead of plain string arrays.
+    """
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        description=app.description,
+        routes=app.routes,
+    )
+    for name, schema in openapi_schema.get("components", {}).get("schemas", {}).items():
+        for prop_name, prop in schema.get("properties", {}).items():
+            if prop.get("type") == "array" and "items" in prop:
+                if prop_name == "files" or "contentMediaType" in prop.get("items", {}):
+                    prop["items"]["format"] = "binary"
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 # 2. Configure Cross-Origin Resource Sharing (CORS)
 # Allows the Streamlit frontend (:8501) to communicate with this backend (:8000)
@@ -70,8 +97,8 @@ def health_check():
 )
 async def screen_patient(
     patient_id: str = Form(..., description="Unique patient identifier, e.g. 'patient_001'"),
-    files: Optional[List[UploadFile]] = File(
-        default=None,
+    files: List[UploadFile] = File(
+        default=[],
         description="One or more uploaded medical files (MRI/CT scans, chest X-rays, ECGs, clinical PDFs)"
     )
 ):
