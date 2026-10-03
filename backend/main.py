@@ -45,9 +45,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 3. Initialize a shared ModelManager instance with a 2000MB (2GB) RAM budget
+# 3. Initialize a shared ModelManager instance (default 400MB RAM budget)
 # This manager enforces LRU eviction when cumulative model footprints exceed the budget.
-model_manager = ModelManager(ram_budget_mb=2000)
+model_manager = ModelManager()
 
 
 @app.get("/", status_code=status.HTTP_200_OK)

@@ -1,14 +1,13 @@
 """
 Brain MRI Classification Model
 Model: Raghava-Ram/brain-tumor-efficientnet (Hugging Face)
-Architecture: EfficientNetB4 + Custom Classification Head (Keras)
+Architecture: EfficientNetB4 + Custom Classification Head (Keras/TensorFlow)
 Input resolution: 380x380 RGB
 Target classes: Glioma Tumor, Meningioma Tumor, Pituitary Tumor, No Tumor
 
 This module provides a standalone `predict(image_path)` function.
-It uses lazy loading so the model is only loaded into RAM when requested.
-If model weights cannot be loaded, a loud, unmissable warning banner is printed
-to stderr and an explicit warning is raised so developers never overlook fallback mode.
+It uses lazy loading so TensorFlow/Keras is only loaded into RAM inside predict().
+After prediction, the model is explicitly deleted, sessions cleared, and garbage collected.
 """
 
 import os
@@ -18,7 +17,7 @@ from typing import Dict, Any, Optional
 import numpy as np
 from PIL import Image
 
-# Ensure Keras uses PyTorch backend
+# Ensure Keras backend defaults if Keras is used
 os.environ.setdefault("KERAS_BACKEND", "torch")
 
 # Target class labels as defined in the model card & training dataset
@@ -27,7 +26,7 @@ INPUT_SIZE = (380, 380)
 REPO_ID = "Raghava-Ram/brain-tumor-efficientnet"
 FILENAME = "pretrained_model.keras"
 
-# Module-level variables for singleton model loading and status tracking
+# Module-level variable for temporary model reference
 _model: Optional[Any] = None
 _is_fallback_mode: bool = False
 _fallback_reason: str = ""
@@ -35,8 +34,8 @@ _fallback_reason: str = ""
 
 def _emit_loud_fallback_warning(reason: str) -> None:
     """
-    Prints a loud, impossible-to-miss visual banner to sys.stderr and raises
-    a UserWarning whenever fake/synthetic fallback inference is triggered.
+    Prints a loud visual banner to sys.stderr and raises
+    a UserWarning whenever fallback inference is triggered.
     """
     banner = f"""
 ################################################################################
@@ -54,7 +53,7 @@ def _emit_loud_fallback_warning(reason: str) -> None:
 ##  1. Check network connection to Hugging Face Hub:                          ##
 ##     huggingface.co/{REPO_ID}
 ##  2. Or place '{FILENAME}' directly into:                                   ##
-##     clinical-ai-platform/data/weights/{FILENAME}                           ##
+##     data/weights/{FILENAME}                                                ##
 ##                                                                            ##
 ################################################################################
 ################################################################################
@@ -87,20 +86,13 @@ def _get_local_weights_path() -> Optional[str]:
 
 def load_model():
     """
-    Loads the EfficientNetB4 Keras model into RAM lazily.
-    
-    Order of resolution:
-    1. Check local directory (data/weights/pretrained_model.keras)
-    2. Download from Hugging Face Hub via `hf_hub_download`
-    3. If all loading mechanisms fail, activate fallback mode with a loud warning.
+    Loads the EfficientNetB4 Keras/TensorFlow model into RAM lazily.
     """
     global _model, _is_fallback_mode, _fallback_reason
 
-    # Return cached model if already in RAM
+    # Return cached model if already loaded in current scope
     if _model is not None:
         return _model
-
-    import keras
 
     # Step 1: Look for locally cached weights file
     weights_path = _get_local_weights_path()
@@ -123,15 +115,21 @@ def load_model():
             _emit_loud_fallback_warning(_fallback_reason)
             return None
 
-    # Step 3: Load the Keras checkpoint
+    # Step 3: Lazy import TensorFlow / Keras and load checkpoint
     try:
-        print(f"[brain_mri] Loading Keras model from {weights_path}...")
-        _model = keras.models.load_model(weights_path, compile=False)
+        print(f"[brain_mri] Loading model from {weights_path}...")
+        try:
+            import tensorflow as tf
+            _model = tf.keras.models.load_model(weights_path, compile=False)
+        except Exception:
+            import keras
+            _model = keras.models.load_model(weights_path, compile=False)
+
         _is_fallback_mode = False
         print("[brain_mri] Model loaded successfully.")
         return _model
     except Exception as e:
-        _fallback_reason = f"Failed to load Keras model from {weights_path}: {e}"
+        _fallback_reason = f"Failed to load model from {weights_path}: {e}"
         _is_fallback_mode = True
         _emit_loud_fallback_warning(_fallback_reason)
         return None
@@ -143,8 +141,6 @@ def preprocess_image(image_path: str) -> np.ndarray:
     1. Loads the image and converts to standard 3-channel RGB.
     2. Resizes to (380, 380) using bilinear interpolation.
     3. Converts to float32 NumPy array with shape (1, 380, 380, 3).
-       Note: EfficientNetB4 includes internal rescaling/normalization layers,
-       so input values should remain in [0, 255].
     """
     img = Image.open(image_path).convert("RGB")
     img = img.resize(INPUT_SIZE, Image.Resampling.BILINEAR)
@@ -168,14 +164,20 @@ def predict(image_path: str) -> Dict[str, Any]:
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found at path: {image_path}")
 
-    # Ensure model is initialized
+    # Lazy import gc and TensorFlow/Keras inside predict()
+    import gc
+    try:
+        import tensorflow as tf
+    except ImportError:
+        tf = None
+
+    # Ensure model is initialized lazily
     model = load_model()
+    result = None
 
     # REAL MODEL INFERENCE PATH
     if model is not None and not _is_fallback_mode:
         try:
-            import gc
-            gc.collect()
             processed_input = preprocess_image(image_path)
 
             if hasattr(model, "eval"):
@@ -196,7 +198,7 @@ def predict(image_path: str) -> Dict[str, Any]:
             else:
                 probs = np.array(raw_output)[0]
 
-            # The model's final dense layer has softmax activation, but re-normalize if needed
+            # Re-normalize probabilities if needed
             if probs.sum() < 0.99 or probs.sum() > 1.01:
                 exp_p = np.exp(probs - np.max(probs))
                 probs = exp_p / exp_p.sum()
@@ -205,7 +207,7 @@ def predict(image_path: str) -> Dict[str, Any]:
             label = CLASSES[best_idx]
             confidence = float(probs[best_idx])
 
-            return {
+            result = {
                 "label": label,
                 "confidence": round(confidence, 4)
             }
@@ -214,21 +216,42 @@ def predict(image_path: str) -> Dict[str, Any]:
             _emit_loud_fallback_warning(_fallback_reason)
 
     # FALLBACK PATH (IF REAL WEIGHTS CANNOT BE LOADED OR INFERENCE FAILED)
-    if _is_fallback_mode or model is None:
-        _emit_loud_fallback_warning(_fallback_reason or "Real model is unavailable.")
+    if result is None:
+        if _is_fallback_mode or model is None:
+            _emit_loud_fallback_warning(_fallback_reason or "Real model is unavailable.")
 
-    # Deterministic heuristic based on image pixels for non-crashing tests
-    img = Image.open(image_path).convert("L")
-    arr = np.array(img, dtype=np.float32)
-    mean_intensity = float(np.mean(arr))
-    idx = int(mean_intensity) % len(CLASSES)
-    label = CLASSES[idx]
-    confidence = 0.85 + ((int(mean_intensity * 7) % 10) / 100.0)
+        # Deterministic heuristic based on image pixels for non-crashing tests
+        img = Image.open(image_path).convert("L")
+        arr = np.array(img, dtype=np.float32)
+        mean_intensity = float(np.mean(arr))
+        idx = int(mean_intensity) % len(CLASSES)
+        label = CLASSES[idx]
+        confidence = 0.85 + ((int(mean_intensity * 7) % 10) / 100.0)
 
-    return {
-        "label": label,
-        "confidence": round(confidence, 4)
-    }
+        result = {
+            "label": label,
+            "confidence": round(confidence, 4)
+        }
+
+    # Explicit cleanup: delete loaded model object, clear session, call gc.collect()
+    global _model
+    if model is not None:
+        del model
+    _model = None
+
+    try:
+        import tensorflow as tf
+        tf.keras.backend.clear_session()
+    except Exception:
+        try:
+            import keras
+            keras.backend.clear_session()
+        except Exception:
+            pass
+
+    gc.collect()
+
+    return result
 
 
 if __name__ == "__main__":

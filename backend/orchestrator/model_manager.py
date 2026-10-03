@@ -28,12 +28,12 @@ class ModelManager:
     Orchestrates dynamic model lifecycle and simulated RAM allocation.
     """
 
-    def __init__(self, ram_budget_mb: int = 2000):
+    def __init__(self, ram_budget_mb: int = 400):
         """
         Initializes the ModelManager with a maximum RAM budget in Megabytes.
 
         Args:
-            ram_budget_mb (int): Simulated memory cap in MB (default: 2000MB / 2GB).
+            ram_budget_mb (int): Simulated memory cap in MB (default: 400MB).
         """
         self.ram_budget_mb = ram_budget_mb
 
