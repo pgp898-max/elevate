@@ -42,33 +42,23 @@ class VectorStore:
     
     Features:
     - PersistentClient saving to disk at data/chroma_db
-    - Embedding function powered by sentence-transformers/all-MiniLM-L6-v2
-    - Patient-partitioned retrieval via metadata filtering (where={"patient_id": patient_id})
+    - Fast metadata-indexed retrieval partitioned by patient_id
+    - Safe query ranking without heavy PyTorch / HuggingFace memory bloat on cloud hosts
     """
 
     def __init__(self, persist_directory: Optional[str] = None):
         """
-        Initializes the ChromaDB persistent client and sets up the embedding function.
+        Initializes the ChromaDB persistent client and sets up the collection.
         """
         self.persist_dir = persist_directory or get_chroma_db_dir()
         
         # 1. Initialize local persistent ChromaDB client
         self.client = chromadb.PersistentClient(path=self.persist_dir)
 
-        # 2. Configure embedding function safely
-        self.embedding_fn = None
-        try:
-            self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=EMBEDDING_MODEL_NAME
-            )
-        except Exception as e:
-            print(f"[VectorStore] Notice: SentenceTransformer embedding function deferred: {e}")
-
-        # 3. Create or retrieve collection with this embedding function
+        # 2. Create or retrieve collection safely without triggering heavy downloads
         try:
             self.collection = self.client.get_or_create_collection(
                 name=DEFAULT_COLLECTION_NAME,
-                embedding_function=self.embedding_fn,
                 metadata={"description": "Patient multimodal electronic health records and notes"}
             )
         except Exception as e:
@@ -103,26 +93,32 @@ class VectorStore:
     def query(self, patient_id: str, query_text: str, top_k: int = 3) -> List[Dict[str, Any]]:
         """
         Queries ChromaDB for the top_k most relevant chunks for a specific patient.
+        Retrieves patient records using ChromaDB's indexed metadata filter and ranks
+        chunks by query relevance with zero heavy ML memory overhead.
         """
         if self.collection is None:
             return []
 
         try:
-            count = self.collection.count()
-            if count == 0:
+            res = self.collection.get(where={"patient_id": patient_id})
+            documents = res.get("documents", [])
+            metadatas = res.get("metadatas", [])
+
+            if not documents:
                 return []
 
-            results = self.collection.query(
-                query_texts=[query_text],
-                n_results=min(top_k, count),
-                where={"patient_id": patient_id}
-            )
-
-            formatted_results = []
-            documents = results.get("documents", [[]])[0]
-            metadatas = results.get("metadatas", [[]])[0]
+            import re
+            q_words = set(re.findall(r'\w+', query_text.lower()))
+            scored = []
 
             for doc, meta in zip(documents, metadatas):
+                t_words = re.findall(r'\w+', doc.lower())
+                score = sum(1 for w in t_words if w in q_words) / max(1, len(q_words)) if t_words else 0.0
+                scored.append((score, doc, meta))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            formatted_results = []
+            for _, doc, meta in scored[:top_k]:
                 formatted_results.append({
                     "chunk": doc,
                     "metadata": meta

@@ -79,9 +79,12 @@ model_manager = ModelManager()
 
 
 @app.on_event("startup")
-def prewarm_vector_store():
-    """Pre-warms the RAG vector store in a background thread to prevent first-request cold-start latency."""
-    threading.Thread(target=get_vector_store, daemon=True).start()
+def startup_init():
+    """Initializes the vector store safely at boot."""
+    try:
+        get_vector_store()
+    except Exception as e:
+        print(f"[startup] Vector store initialization deferred: {e}")
 
 
 @app.get("/", status_code=status.HTTP_200_OK)

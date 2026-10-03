@@ -37,10 +37,10 @@ def get_vector_store() -> Optional[VectorStore]:
     return _store_instance
 
 
-def _get_patient_sample_fallback(patient_id: str, top_k: int = 3) -> List[Dict[str, str]]:
+def _get_patient_sample_fallback(patient_id: str, query: str = "", top_k: int = 3) -> List[Dict[str, str]]:
     """
     Fallback loader that directly extracts clinical notes from sample_patients/{patient_id}
-    if ChromaDB is empty, uninitialized, or times out.
+    and ranks them by query relevance if ChromaDB is empty or uninitialized.
     """
     records = []
     base_dirs = [
@@ -76,6 +76,20 @@ def _get_patient_sample_fallback(patient_id: str, top_k: int = 3) -> List[Dict[s
             if records:
                 break
 
+    if not records:
+        return []
+
+    if query:
+        import re
+        q_words = set(re.findall(r'\w+', query.lower()))
+        scored = []
+        for rec in records:
+            t_words = re.findall(r'\w+', rec["chunk"].lower())
+            score = sum(1 for w in t_words if w in q_words) / max(1, len(q_words)) if t_words else 0.0
+            scored.append((score, rec))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [r for _, r in scored[:top_k]]
+
     return records[:top_k]
 
 
@@ -108,7 +122,7 @@ def retrieve_patient_context(patient_id: str, query: str, top_k: int = 3) -> Lis
         return retrieved_history
 
     # 3. Otherwise, use fast patient record fallback (prevents 502/timeouts on cloud hosts)
-    return _get_patient_sample_fallback(patient_id, top_k=top_k)
+    return _get_patient_sample_fallback(patient_id, query=query, top_k=top_k)
 
 
 if __name__ == "__main__":
