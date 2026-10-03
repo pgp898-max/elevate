@@ -12,8 +12,8 @@ venv/
 **/data/weights/*.onnx
 weights/
 
-# Vector database storage
-**/chroma_db/
+# Vector database storage (committed so Render has pre-indexed patient records)
+# **/chroma_db/
 
 # Secrets and local environment files
 .env

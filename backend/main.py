@@ -25,9 +25,10 @@ from backend.schemas import (
 )
 
 # Import orchestrator and RAG modules
+import threading
 from backend.orchestrator.router import route_files, route_files_with_inputs
 from backend.orchestrator.model_manager import ModelManager
-from backend.rag.retriever import retrieve_patient_context
+from backend.rag.retriever import retrieve_patient_context, get_vector_store
 
 # 1. Initialize the FastAPI application instance
 app = FastAPI(
@@ -75,6 +76,12 @@ app.add_middleware(
 # 3. Initialize a shared ModelManager instance (default 400MB RAM budget)
 # This manager enforces LRU eviction when cumulative model footprints exceed the budget.
 model_manager = ModelManager()
+
+
+@app.on_event("startup")
+def prewarm_vector_store():
+    """Pre-warms the RAG vector store in a background thread to prevent first-request cold-start latency."""
+    threading.Thread(target=get_vector_store, daemon=True).start()
 
 
 @app.get("/", status_code=status.HTTP_200_OK)
@@ -164,11 +171,15 @@ async def screen_patient(
             rag_query = "patient medical history discharge summary clinical diagnosis"
 
         print(f"[/screen] Querying RAG context for '{patient_id}' with topic: '{rag_query[:60]}...'")
-        retrieved_history = retrieve_patient_context(
-            patient_id=patient_id,
-            query=rag_query,
-            top_k=3
-        )
+        try:
+            retrieved_history = retrieve_patient_context(
+                patient_id=patient_id,
+                query=rag_query,
+                top_k=3
+            )
+        except Exception as e:
+            print(f"[/screen] Error retrieving patient context: {e}")
+            retrieved_history = []
 
         # Step 5: Assemble response matching exact schema in backend/schemas.py
         response_payload = {
