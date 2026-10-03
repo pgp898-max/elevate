@@ -1,0 +1,19 @@
+# Python bytecode & cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+
+# Model weights
+data/weights/*.keras
+data/weights/*.pt
+data/weights/*.onnx
+weights/
+
+# Vector database storage
+data/chroma_db/
+
+# Secrets and local environment files
+.env
