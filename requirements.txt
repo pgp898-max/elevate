@@ -42,4 +42,4 @@ python-docx>=1.1.0
 
 # Environment Configuration
 python-dotenv>=1.0.1
-5bb8377aa4a0f5d82a2262ee153117df54b4ec7d
+
